@@ -1,0 +1,84 @@
+name: Tiny11 Full ISO Builder
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Prepare
+        run: |
+          mkdir C:\iso
+          mkdir C:\tiny11
+          mkdir C:\mount
+
+      - name: Download Windows ISO
+        run: |
+          Invoke-WebRequest -Uri "${{ secrets.WIN_ISO_URL }}" -OutFile win11.iso
+
+      - name: Extract ISO
+        run: |
+          Mount-DiskImage win11.iso
+          $drive = (Get-DiskImage win11.iso | Get-Volume).DriveLetter
+          Copy-Item "$($drive):\*" C:\iso -Recurse
+          Dismount-DiskImage win11.iso
+          Remove-Item win11.iso
+
+      - name: Clone Tiny11 Builder
+        run: |
+          git clone https://github.com/ntdevlabs/tiny11builder.git C:\tiny11
+
+      - name: Patch Tiny11 Script (AUTO MODE)
+        run: |
+          (Get-Content C:\tiny11\tiny11.ps1) `
+          -replace "Read-Host.*", "`$edition = 1" `
+          -replace "pause", "" `
+          | Set-Content C:\tiny11\tiny11_auto.ps1
+
+      - name: Run Tiny11 Builder
+        run: |
+          powershell -ExecutionPolicy Bypass -File C:\tiny11\tiny11_auto.ps1 -Source "C:\iso" -Destination "C:\tiny11_build"
+
+      - name: Mount Built WIM
+        run: |
+          dism /Mount-Wim /WimFile:C:\tiny11_build\sources\install.wim /index:1 /MountDir:C:\mount
+
+      - name: Apply Your Extreme Tweaks
+        run: |
+          reg load HKLM\OFFLINE_SYSTEM C:\mount\Windows\System32\config\SYSTEM
+          reg load HKLM\OFFLINE_SOFTWARE C:\mount\Windows\System32\config\SOFTWARE
+
+          $services = @(
+            "SysMain","WSearch","DiagTrack",
+            "wuauserv","WinDefend","Spooler"
+          )
+
+          foreach ($s in $services) {
+            reg add "HKLM\OFFLINE_SYSTEM\ControlSet001\Services\$s" /v Start /t REG_DWORD /d 4 /f
+          }
+
+          reg unload HKLM\OFFLINE_SYSTEM
+          reg unload HKLM\OFFLINE_SOFTWARE
+
+      - name: Commit WIM
+        run: |
+          dism /Unmount-Wim /MountDir:C:\mount /Commit
+
+      - name: Build ISO (No ADK Trick)
+        run: |
+          Invoke-WebRequest https://github.com/ebiggers/wimlib/releases/download/v1.13.6/wimlib-1.13.6-windows-x86_64-bin.zip -OutFile tools.zip
+          Expand-Archive tools.zip -DestinationPath C:\tools
+
+          C:\tools\wimlib-imagex.exe capture C:\tiny11_build C:\tiny11_extreme.iso --boot
+
+      - name: Compress Output
+        run: |
+          Compress-Archive C:\tiny11_extreme.iso tiny11_extreme.zip
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-extreme
+          path: tiny11_extreme.zip
