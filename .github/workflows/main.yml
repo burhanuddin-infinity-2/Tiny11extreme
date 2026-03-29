@@ -18,7 +18,7 @@ jobs:
       - name: Download Windows ISO
         shell: powershell
         run: |
-          curl -L --fail --retry 5 --retry-delay 10 "${{ secrets.WIN_ISO_URL }}" -o win11.iso
+          curl.exe -L --fail --retry 5 --retry-delay 10 "${{ secrets.WIN_ISO_URL }}" -o win11.iso
 
       - name: Verify ISO
         shell: powershell
