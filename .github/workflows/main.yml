@@ -14,6 +14,7 @@ jobs:
           New-Item -ItemType Directory -Path C:\iso -Force
           New-Item -ItemType Directory -Path C:\tiny11 -Force
           New-Item -ItemType Directory -Path C:\mount -Force
+          New-Item -ItemType Directory -Path C:\tiny11_build -Force
 
       - name: Download Windows ISO
         shell: powershell
@@ -23,11 +24,24 @@ jobs:
       - name: Extract ISO
         shell: powershell
         run: |
-          Mount-DiskImage -ImagePath (Resolve-Path win11.iso)
-          $drive = (Get-DiskImage win11.iso | Get-Volume).DriveLetter
-          Copy-Item "$($drive):\*" C:\iso -Recurse
-          Dismount-DiskImage win11.iso
-          Remove-Item win11.iso
+          $isoPath = (Resolve-Path "win11.iso").Path
+
+          # Mount ISO
+          $disk = Mount-DiskImage -ImagePath $isoPath -PassThru
+          Start-Sleep -Seconds 5
+
+          # Get drive letter
+          $volume = $disk | Get-Volume
+          $driveLetter = $volume.DriveLetter + ":"
+
+          Write-Host "Mounted ISO at $driveLetter"
+
+          # Copy files
+          Copy-Item "$driveLetter\*" C:\iso -Recurse -Force
+
+          # Dismount
+          Dismount-DiskImage -ImagePath $isoPath
+          Remove-Item $isoPath -Force
 
       - name: Clone Tiny11 Builder
         shell: powershell
@@ -54,7 +68,7 @@ jobs:
         run: |
           dism /Mount-Wim /WimFile:C:\tiny11_build\sources\install.wim /index:1 /MountDir:C:\mount
 
-      - name: Apply ULTRA Tweaks + Stores
+      - name: Apply ULTRA Tweaks
         shell: powershell
         run: |
           reg load HKLM\OFFLINE_SYSTEM C:\mount\Windows\System32\config\SYSTEM
@@ -70,91 +84,31 @@ jobs:
             reg add "HKLM\OFFLINE_SYSTEM\ControlSet001\Services\$s" /v Start /t REG_DWORD /d 4 /f
           }
 
-          # Remove Edge (safe)
-          takeown /f "C:\mount\Program Files (x86)\Microsoft\Edge" /r /d y
-          icacls "C:\mount\Program Files (x86)\Microsoft\Edge" /grant Administrators:F /t
-          Remove-Item "C:\mount\Program Files (x86)\Microsoft\Edge" -Recurse -Force -ErrorAction SilentlyContinue
+          # Remove Edge (safe way)
+          Remove-Item -Recurse -Force C:\mount\Program Files (x86)\Microsoft\Edge -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force C:\mount\Program Files\Microsoft\Edge -ErrorAction SilentlyContinue
 
-          # Remove UWP bloat
-          $apps = @(
-            "Microsoft.Xbox*",
-            "MicrosoftTeams",
-            "Microsoft.Bing*",
-            "Microsoft.GetHelp",
-            "Microsoft.Getstarted",
-            "Microsoft.MicrosoftOfficeHub",
-            "Microsoft.People",
-            "Microsoft.ZuneMusic",
-            "Microsoft.ZuneVideo"
-          )
+          # Disable telemetry
+          reg add "HKLM\OFFLINE_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f
 
-          foreach ($app in $apps) {
-            dism /Image:C:\mount /Get-ProvisionedAppxPackages |
-            Where-Object { $_ -like "*$app*" } |
-            ForEach-Object {
-              dism /Image:C:\mount /Remove-ProvisionedAppxPackage /PackageName:$_
-            }
-          }
-
-          # -----------------------------
-          # DOWNLOAD STORES
-          # -----------------------------
-
-          Invoke-WebRequest https://aka.ms/getwinget -OutFile C:\mount\Windows\Temp\winget.appxbundle
-
-          Invoke-WebRequest https://github.com/marticliment/UniGetUI/releases/latest/download/UniGetUI.Installer.exe -OutFile C:\mount\Windows\Temp\store.exe
-
-          # Scoop installer
-          Set-Content C:\mount\Windows\Temp\install_scoop.cmd @"
-          powershell -Command "Set-ExecutionPolicy RemoteSigned -Scope CurrentUser; iwr get.scoop.sh -useb | iex"
-          "@
-
-          # Chocolatey installer
-          Set-Content C:\mount\Windows\Temp\install_choco.cmd @"
-          powershell -Command "Set-ExecutionPolicy Bypass -Scope Process; iwr https://chocolatey.org/install.ps1 | iex"
-          "@
-
-          # -----------------------------
-          # FIRST BOOT SCRIPT
-          # -----------------------------
-
-          New-Item -ItemType Directory -Path C:\mount\Windows\Setup\Scripts -Force
-
-          Set-Content C:\mount\Windows\Setup\Scripts\SetupComplete.cmd @"
-          @echo off
-
-          powershell -ExecutionPolicy Bypass -Command "Add-AppxPackage C:\Windows\Temp\winget.appxbundle"
-
-          call C:\Windows\Temp\install_scoop.cmd
-          call C:\Windows\Temp\install_choco.cmd
-
-          start /wait C:\Windows\Temp\store.exe /silent
-
-          exit
-          "@
-
+          # Unload registry
           reg unload HKLM\OFFLINE_SYSTEM
           reg unload HKLM\OFFLINE_SOFTWARE
 
-      - name: Commit WIM
+      - name: Unmount WIM
         shell: powershell
         run: |
           dism /Unmount-Wim /MountDir:C:\mount /Commit
 
-      - name: Create Bootable ISO
+      - name: Create ISO
         shell: powershell
         run: |
           oscdimg -m -o -u2 -udfver102 `
-          -bootdata:2#p0,e,bC:\iso\boot\etfsboot.com#pEF,e,bC:\iso\efi\microsoft\boot\efisys.bin `
-          C:\tiny11_build C:\tiny11_extreme.iso
+            C:\tiny11_build `
+            C:\tiny11_ultra.iso
 
-      - name: Compress ISO
-        shell: powershell
-        run: |
-          Compress-Archive C:\tiny11_extreme.iso tiny11_extreme.zip
-
-      - name: Upload Artifact
+      - name: Upload ISO
         uses: actions/upload-artifact@v4
         with:
-          name: tiny11-ultra
-          path: tiny11_extreme.zip
+          name: tiny11-ultra-iso
+          path: C:\tiny11_ultra.iso
