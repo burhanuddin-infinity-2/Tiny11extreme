@@ -1,4 +1,4 @@
-name: Tiny11 ULTRA ISO Builder
+name: Tiny11 EXTREME ISO Builder
 
 on:
   workflow_dispatch:
@@ -8,107 +8,112 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
       - name: Prepare
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Path C:\iso -Force
-          New-Item -ItemType Directory -Path C:\tiny11 -Force
           New-Item -ItemType Directory -Path C:\mount -Force
-          New-Item -ItemType Directory -Path C:\tiny11_build -Force
 
       - name: Download Windows ISO
         shell: powershell
         run: |
           curl.exe -L --fail --retry 5 --retry-delay 10 "${{ secrets.WIN_ISO_URL }}" -o win11.iso
 
-      - name: Extract ISO
+      - name: Mount ISO
         shell: powershell
         run: |
           $isoPath = (Resolve-Path "win11.iso").Path
-
-          # Mount ISO
           $disk = Mount-DiskImage -ImagePath $isoPath -PassThru
           Start-Sleep -Seconds 5
-
-          # Get drive letter
           $volume = $disk | Get-Volume
-          $driveLetter = $volume.DriveLetter + ":"
+          echo "ISO_DRIVE=$($volume.DriveLetter)" >> $env:GITHUB_ENV
 
-          Write-Host "Mounted ISO at $driveLetter"
-
-          # Copy files
-          Copy-Item "$driveLetter\*" C:\iso -Recurse -Force
-
-          # Dismount
-          Dismount-DiskImage -ImagePath $isoPath
-          Remove-Item $isoPath -Force
-
-      - name: Clone Tiny11 Builder
+      - name: Run Tiny11 Maker
         shell: powershell
         run: |
-          git clone https://github.com/ntdevlabs/tiny11builder.git C:\tiny11
+          powershell -ExecutionPolicy Bypass -File .\tiny11maker.ps1 `
+            -ISO "$env:ISO_DRIVE" `
+            -SCRATCH "C"
 
-      - name: Patch Tiny11 Script (AUTO MODE)
+      - name: Locate install.wim
         shell: powershell
         run: |
-          (Get-Content C:\tiny11\tiny11maker.ps1) `
-          -replace "Read-Host.*", "`$edition = 1" `
-          -replace "pause", "" `
-          | Set-Content C:\tiny11\tiny11_auto.ps1
+          $wim = Get-ChildItem C:\ -Recurse -Filter install.wim -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $wim) { Write-Error "install.wim not found"; exit 1 }
+          echo "WIM_PATH=$($wim.FullName)" >> $env:GITHUB_ENV
 
-      - name: Run Tiny11 Builder
+      # 🔥 EXTREME TWEAKS
+      - name: Apply EXTREME Tweaks
         shell: powershell
         run: |
-          powershell -ExecutionPolicy Bypass -File C:\tiny11\tiny11_auto.ps1 `
-            -Source "C:\iso" `
-            -Destination "C:\tiny11_build"
+          dism /Mount-Wim /WimFile:$env:WIM_PATH /index:1 /MountDir:C:\mount
 
-      - name: Mount Built WIM
-        shell: powershell
-        run: |
-          dism /Mount-Wim /WimFile:C:\tiny11_build\sources\install.wim /index:1 /MountDir:C:\mount
-
-      - name: Apply ULTRA Tweaks
-        shell: powershell
-        run: |
           reg load HKLM\OFFLINE_SYSTEM C:\mount\Windows\System32\config\SYSTEM
           reg load HKLM\OFFLINE_SOFTWARE C:\mount\Windows\System32\config\SOFTWARE
+          reg load HKLM\OFFLINE_DEFAULT C:\mount\Windows\System32\config\DEFAULT
 
-          # Disable heavy services
+          # 🚫 EXTREME SERVICE STRIP
           $services = @(
-            "SysMain","WSearch","DiagTrack",
-            "wuauserv","WinDefend","Spooler"
+            "SysMain","WSearch","DiagTrack","wuauserv","WinDefend",
+            "Spooler","BITS","WerSvc","Fax","MapsBroker",
+            "WbioSrvc","TabletInputService","RemoteRegistry",
+            "AJRouter","lfsvc","SharedAccess","TrkWks",
+            "stisvc","SSDPSRV","upnphost"
           )
-
           foreach ($s in $services) {
             reg add "HKLM\OFFLINE_SYSTEM\ControlSet001\Services\$s" /v Start /t REG_DWORD /d 4 /f
           }
 
-          # Remove Edge (safe way)
-          Remove-Item -Recurse -Force C:\mount\Program Files (x86)\Microsoft\Edge -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force C:\mount\Program Files\Microsoft\Edge -ErrorAction SilentlyContinue
-
-          # Disable telemetry
+          # 🚫 TELEMETRY HARD KILL
           reg add "HKLM\OFFLINE_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f
 
-          # Unload registry
+          # 🚫 DEFENDER REMOVE
+          reg add "HKLM\OFFLINE_SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f
+
+          # 🚫 REMOVE SYSTEM APPS
+          Remove-Item -Recurse -Force "C:\mount\Program Files (x86)\Microsoft\Edge" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\mount\Program Files\Microsoft\Edge" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\mount\Windows\SystemApps\Microsoft.Windows.Cortana*" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\mount\Windows\SystemApps\MicrosoftWindows.Client.CBS*" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\mount\Windows\SystemApps\MicrosoftWindows.Client.WebExperience*" -ErrorAction SilentlyContinue
+
+          # 🚫 ONEDRIVE REMOVE
+          Remove-Item -Force "C:\mount\Windows\System32\OneDriveSetup.exe" -ErrorAction SilentlyContinue
+
+          # ⚡ EXTREME PERFORMANCE
+          reg add "HKLM\OFFLINE_SYSTEM\ControlSet001\Control\Session Manager\Memory Management" /v LargeSystemCache /t REG_DWORD /d 1 /f
+          reg add "HKLM\OFFLINE_SYSTEM\ControlSet001\Control\Session Manager\Memory Management" /v DisablePagingExecutive /t REG_DWORD /d 1 /f
+          reg add "HKLM\OFFLINE_SYSTEM\ControlSet001\Control\Power" /v HibernateEnabled /t REG_DWORD /d 0 /f
+
+          # ⚡ UI INSTANT RESPONSE
+          reg add "HKLM\OFFLINE_DEFAULT\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 0 /f
+          reg add "HKLM\OFFLINE_DEFAULT\Control Panel\Desktop" /v AutoEndTasks /t REG_SZ /d 1 /f
+          reg add "HKLM\OFFLINE_DEFAULT\Control Panel\Desktop" /v WaitToKillAppTimeout /t REG_SZ /d 1000 /f
+
+          # 🚫 BACKGROUND APPS HARD BLOCK
+          reg add "HKLM\OFFLINE_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v LetAppsRunInBackground /t REG_DWORD /d 2 /f
+
+          # 🚫 ADS + CONTENT
+          reg add "HKLM\OFFLINE_SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SubscribedContent-338388Enabled /t REG_DWORD /d 0 /f
+
+          # 🔥 EXTREME: COMPONENT STORE CLEANUP
+          dism /Image:C:\mount /Cleanup-Image /StartComponentCleanup /ResetBase
+
+          # 🔥 EXTREME: COMPRESS WINDOWS
+          compact.exe /compactos:always
+
           reg unload HKLM\OFFLINE_SYSTEM
           reg unload HKLM\OFFLINE_SOFTWARE
+          reg unload HKLM\OFFLINE_DEFAULT
 
-      - name: Unmount WIM
-        shell: powershell
-        run: |
           dism /Unmount-Wim /MountDir:C:\mount /Commit
-
-      - name: Create ISO
-        shell: powershell
-        run: |
-          oscdimg -m -o -u2 -udfver102 `
-            C:\tiny11_build `
-            C:\tiny11_ultra.iso
 
       - name: Upload ISO
         uses: actions/upload-artifact@v4
         with:
-          name: tiny11-ultra-iso
-          path: C:\tiny11_ultra.iso
+          name: tiny11-extreme
+          path: |
+            C:\*.iso
+            C:\**\*.iso
