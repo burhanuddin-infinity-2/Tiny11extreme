@@ -33,7 +33,7 @@ jobs:
       - name: Run Tiny11 Maker
         shell: powershell
         run: |
-          powershell -ExecutionPolicy Bypass -File .\tiny11maker.ps1 `
+          powershell -ExecutionPolicy Bypass -File .\t.ps1 `
             -ISO "$env:ISO_DRIVE" `
             -SCRATCH "C"
 
