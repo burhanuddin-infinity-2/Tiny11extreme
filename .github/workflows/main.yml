@@ -51,7 +51,7 @@ jobs:
       - name: Patch Tiny11 Script (AUTO MODE)
         shell: powershell
         run: |
-          (Get-Content C:\tiny11\tiny11.ps1) `
+          (Get-Content C:\tiny11\tiny11maker.ps1) `
           -replace "Read-Host.*", "`$edition = 1" `
           -replace "pause", "" `
           | Set-Content C:\tiny11\tiny11_auto.ps1
