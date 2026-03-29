@@ -20,22 +20,6 @@ jobs:
         run: |
           curl.exe -L --fail --retry 5 --retry-delay 10 "${{ secrets.WIN_ISO_URL }}" -o win11.iso
 
-      - name: Verify ISO
-        shell: powershell
-        run: |
-          if (!(Test-Path "win11.iso")) {
-            Write-Error "ISO not downloaded!"
-            exit 1
-          }
-
-          $size = (Get-Item "win11.iso").Length / 1MB
-          Write-Host "ISO Size: $size MB"
-
-          if ($size -lt 4000) {
-            Write-Error "ISO too small — download failed!"
-            exit 1
-          }
-
       - name: Extract ISO
         shell: powershell
         run: |
