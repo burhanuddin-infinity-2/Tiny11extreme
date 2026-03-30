@@ -38,7 +38,7 @@ jobs:
       - name: Patch Script (Auto-select Pro)
         shell: powershell
         run: |
-          (Get-Content .\tiny11maker.ps1) `
+          (Get-Content .\t.ps1) `
           -replace '\$ImagesIndex = .*', '$img = Get-WindowsImage -ImagePath $ScratchDisk\tiny11\sources\install.wim; $index = ($img | Where-Object {$_.ImageName -like "*Pro*"} | Select-Object -First 1).ImageIndex' `
           -replace 'while \(\$ImagesIndex -notcontains \$index\) \{[\s\S]*?\}', '' `
           | Set-Content .\tiny11_auto.ps1
