@@ -1,4 +1,4 @@
-name: Tiny11 EXTREME ISO Builder
+name: Tiny11 EXTREME ISO Builder (Auto + No Prompt)
 
 on:
   workflow_dispatch:
@@ -8,19 +8,23 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # 📦 Get repo (your script)
       - name: Checkout Repo
         uses: actions/checkout@v4
 
+      # 🔧 Prepare
       - name: Prepare
         shell: powershell
         run: |
           New-Item -ItemType Directory -Path C:\mount -Force
 
+      # ⬇️ Download ISO
       - name: Download Windows ISO
         shell: powershell
         run: |
           curl.exe -L --fail --retry 5 --retry-delay 10 "${{ secrets.WIN_ISO_URL }}" -o win11.iso
 
+      # 💿 Mount ISO
       - name: Mount ISO
         shell: powershell
         run: |
@@ -30,13 +34,24 @@ jobs:
           $volume = $disk | Get-Volume
           echo "ISO_DRIVE=$($volume.DriveLetter)" >> $env:GITHUB_ENV
 
+      # 🔥 PATCH SCRIPT (REMOVE PROMPT + AUTO SELECT PRO)
+      - name: Patch Script (Auto-select Pro)
+        shell: powershell
+        run: |
+          (Get-Content .\tiny11maker.ps1) `
+          -replace '\$ImagesIndex = .*', '$img = Get-WindowsImage -ImagePath $ScratchDisk\tiny11\sources\install.wim; $index = ($img | Where-Object {$_.ImageName -like "*Pro*"} | Select-Object -First 1).ImageIndex' `
+          -replace 'while \(\$ImagesIndex -notcontains \$index\) \{[\s\S]*?\}', '' `
+          | Set-Content .\tiny11_auto.ps1
+
+      # 🚀 Run script (NO PROMPT)
       - name: Run Tiny11 Maker
         shell: powershell
         run: |
-          powershell -ExecutionPolicy Bypass -File .\t.ps1 `
+          powershell -ExecutionPolicy Bypass -File .\tiny11_auto.ps1 `
             -ISO "$env:ISO_DRIVE" `
             -SCRATCH "C"
 
+      # 🔍 Find install.wim
       - name: Locate install.wim
         shell: powershell
         run: |
@@ -44,7 +59,7 @@ jobs:
           if (-not $wim) { Write-Error "install.wim not found"; exit 1 }
           echo "WIM_PATH=$($wim.FullName)" >> $env:GITHUB_ENV
 
-      # 🔥 EXTREME TWEAKS
+      # 💀 EXTREME TWEAKS
       - name: Apply EXTREME Tweaks
         shell: powershell
         run: |
@@ -54,7 +69,7 @@ jobs:
           reg load HKLM\OFFLINE_SOFTWARE C:\mount\Windows\System32\config\SOFTWARE
           reg load HKLM\OFFLINE_DEFAULT C:\mount\Windows\System32\config\DEFAULT
 
-          # 🚫 EXTREME SERVICE STRIP
+          # 🚫 Disable services
           $services = @(
             "SysMain","WSearch","DiagTrack","wuauserv","WinDefend",
             "Spooler","BITS","WerSvc","Fax","MapsBroker",
@@ -66,42 +81,40 @@ jobs:
             reg add "HKLM\OFFLINE_SYSTEM\ControlSet001\Services\$s" /v Start /t REG_DWORD /d 4 /f
           }
 
-          # 🚫 TELEMETRY HARD KILL
+          # 🚫 Telemetry OFF
           reg add "HKLM\OFFLINE_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f
 
-          # 🚫 DEFENDER REMOVE
+          # 🚫 Defender OFF
           reg add "HKLM\OFFLINE_SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f
 
-          # 🚫 REMOVE SYSTEM APPS
+          # 🚫 Remove apps
           Remove-Item -Recurse -Force "C:\mount\Program Files (x86)\Microsoft\Edge" -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force "C:\mount\Program Files\Microsoft\Edge" -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force "C:\mount\Windows\SystemApps\Microsoft.Windows.Cortana*" -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force "C:\mount\Windows\SystemApps\MicrosoftWindows.Client.CBS*" -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force "C:\mount\Windows\SystemApps\MicrosoftWindows.Client.WebExperience*" -ErrorAction SilentlyContinue
 
-          # 🚫 ONEDRIVE REMOVE
+          # 🚫 OneDrive
           Remove-Item -Force "C:\mount\Windows\System32\OneDriveSetup.exe" -ErrorAction SilentlyContinue
 
-          # ⚡ EXTREME PERFORMANCE
+          # ⚡ Performance tweaks
           reg add "HKLM\OFFLINE_SYSTEM\ControlSet001\Control\Session Manager\Memory Management" /v LargeSystemCache /t REG_DWORD /d 1 /f
           reg add "HKLM\OFFLINE_SYSTEM\ControlSet001\Control\Session Manager\Memory Management" /v DisablePagingExecutive /t REG_DWORD /d 1 /f
           reg add "HKLM\OFFLINE_SYSTEM\ControlSet001\Control\Power" /v HibernateEnabled /t REG_DWORD /d 0 /f
 
-          # ⚡ UI INSTANT RESPONSE
+          # ⚡ UI speed
           reg add "HKLM\OFFLINE_DEFAULT\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 0 /f
           reg add "HKLM\OFFLINE_DEFAULT\Control Panel\Desktop" /v AutoEndTasks /t REG_SZ /d 1 /f
           reg add "HKLM\OFFLINE_DEFAULT\Control Panel\Desktop" /v WaitToKillAppTimeout /t REG_SZ /d 1000 /f
 
-          # 🚫 BACKGROUND APPS HARD BLOCK
+          # 🚫 Background apps
           reg add "HKLM\OFFLINE_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v LetAppsRunInBackground /t REG_DWORD /d 2 /f
 
-          # 🚫 ADS + CONTENT
+          # 🚫 Ads
           reg add "HKLM\OFFLINE_SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SubscribedContent-338388Enabled /t REG_DWORD /d 0 /f
 
-          # 🔥 EXTREME: COMPONENT STORE CLEANUP
+          # 🔥 Cleanup + compression
           dism /Image:C:\mount /Cleanup-Image /StartComponentCleanup /ResetBase
-
-          # 🔥 EXTREME: COMPRESS WINDOWS
           compact.exe /compactos:always
 
           reg unload HKLM\OFFLINE_SYSTEM
@@ -110,6 +123,7 @@ jobs:
 
           dism /Unmount-Wim /MountDir:C:\mount /Commit
 
+      # 📦 Upload ISO
       - name: Upload ISO
         uses: actions/upload-artifact@v4
         with:
