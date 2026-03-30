@@ -35,13 +35,7 @@ jobs:
           echo "ISO_DRIVE=$($volume.DriveLetter)" >> $env:GITHUB_ENV
 
       # 🔥 PATCH SCRIPT (REMOVE PROMPT + AUTO SELECT PRO)
-      - name: Patch Script (Auto-select Pro)
-        shell: powershell
-        run: |
-          (Get-Content .\t.ps1) `
-          -replace '\$ImagesIndex = .*', '$img = Get-WindowsImage -ImagePath $ScratchDisk\tiny11\sources\install.wim; $index = ($img | Where-Object {$_.ImageName -like "*Pro*"} | Select-Object -First 1).ImageIndex' `
-          -replace 'while \(\$ImagesIndex -notcontains \$index\) \{[\s\S]*?\}', '' `
-          | Set-Content .\tiny11_auto.ps1
+      ps1
 
       # 🚀 Run script (NO PROMPT)
       - name: Run Tiny11 Maker
